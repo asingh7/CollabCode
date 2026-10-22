@@ -1,4 +1,4 @@
-# OpenCollab 🚀
+# CodeCollab 🚀
 
 ### Real-time Collaborative Code Editor for Technical Interviews & Pair Programming
 
@@ -31,7 +31,7 @@
 
 ---
 
-## 🎯 Why OpenCollab?
+## 🎯 Why CodeCollab?
 
 <table>
   <tr>
@@ -52,10 +52,10 @@
 
 <p align="center">
   <!-- Add demo GIF here: docs/screenshots/demo.gif -->
-<img src="docs/screenshots/demo.gif" alt="OpenCollab Demo" width="100%">
+<img src="docs/screenshots/demo.gif" alt="CodeCollab Demo" width="100%">
 </p>
 
-**Try it now:** [OpenCollab Live Demo](https://opencollab-demo.vercel.app)
+**Try it now:** [CodeCollab Live Demo](https://opencollab-demo.vercel.app)
 
 ### 📸 Screenshots
 
@@ -270,7 +270,7 @@ npm run dev
 ## 📦 Project Structure
 
 ```
-OpenCollab/
+CodeCollab/
 ├── 📁 api/                 # Serverless API endpoints
 │   ├── auth/              # Authentication endpoints
 │   └── sessions/          # Session management

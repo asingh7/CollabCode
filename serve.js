@@ -56,7 +56,7 @@ server.listen(PORT, () => {
   console.log(`
 ╔════════════════════════════════════════════════════╗
 ║                                                    ║
-║   🚀 OpenCollab Development Server                 ║
+║   🚀 CodeCollab Development Server                 ║
 ║                                                    ║
 ║   Server running at:                              ║
 ║   http://localhost:${PORT}                            ║
