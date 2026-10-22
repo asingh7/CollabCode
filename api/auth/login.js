@@ -1,15 +1,44 @@
 /**
  * Vercel Serverless Function - Login Endpoint
  * /api/auth/login
+ *
+ * Interviewer accounts:
+ * - Primary admin: ADMIN_EMAIL + ADMIN_PASSWORD_HASH env vars.
+ * - Additional interviewers: ADMIN_USERS env var, a JSON array of
+ *   { "email": "...", "passwordHash": "<bcrypt hash>" } entries.
+ * Anyone on the combined list can log in as an interviewer (isAdmin).
  */
 
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
-// Admin credentials (use environment variables in production)
+// Primary admin credentials (use environment variables in production)
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
 const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
 const JWT_SECRET = process.env.JWT_SECRET;
+
+// Build the full list of interviewer accounts: primary admin + ADMIN_USERS.
+function getInterviewerUsers() {
+  const users = [];
+  if (ADMIN_EMAIL && ADMIN_PASSWORD_HASH) {
+    users.push({ email: ADMIN_EMAIL, passwordHash: ADMIN_PASSWORD_HASH });
+  }
+  if (process.env.ADMIN_USERS) {
+    try {
+      const extra = JSON.parse(process.env.ADMIN_USERS);
+      if (Array.isArray(extra)) {
+        for (const entry of extra) {
+          if (entry && typeof entry.email === 'string' && typeof entry.passwordHash === 'string') {
+            users.push({ email: entry.email, passwordHash: entry.passwordHash });
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Failed to parse ADMIN_USERS environment variable:', e.message);
+    }
+  }
+  return users;
+}
 
 // Ensure required environment variables are set
 if (!ADMIN_EMAIL || !ADMIN_PASSWORD_HASH || !JWT_SECRET) {
@@ -41,15 +70,10 @@ module.exports = async (req, res) => {
     }
   }
 
-  // Debug logging (remove in production)
-  console.log('Request body type:', typeof req.body);
-  console.log('Request body:', req.body);
-  console.log('Parsed body:', body);
-
   const { email, password } = body || {};
 
   if (!email || !password) {
-    return res.status(400).json({ 
+    return res.status(400).json({
       error: 'Email and password required',
       debug: process.env.NODE_ENV !== 'production' ? {
         bodyType: typeof req.body,
@@ -61,13 +85,17 @@ module.exports = async (req, res) => {
   }
 
   try {
-    // Check email
-    if (email !== ADMIN_EMAIL) {
+    // Find the interviewer account (email match is case-insensitive)
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const user = getInterviewerUsers().find(
+      (u) => u.email.trim().toLowerCase() === normalizedEmail
+    );
+    if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // Verify password
-    const validPassword = await bcrypt.compare(password, ADMIN_PASSWORD_HASH);
+    // Verify password against that account's hash
+    const validPassword = await bcrypt.compare(password, user.passwordHash);
     if (!validPassword) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
@@ -75,7 +103,7 @@ module.exports = async (req, res) => {
     // Generate token
     const token = jwt.sign(
       {
-        email: email,
+        email: user.email,
         isAdmin: true,
         userId: 'admin-' + Date.now()
       },
@@ -85,8 +113,8 @@ module.exports = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      token: token,
-      user: { email: email, isAdmin: true }
+      token,
+      user: { email: user.email, isAdmin: true }
     });
   } catch (error) {
     console.error('Login error:', error);
