@@ -290,7 +290,7 @@
       const currentUser = Auth.getCurrentUser();
       const interviewerName = document.getElementById('interviewerName')?.value.trim();
       const adminName = interviewerName ? 
-        `${interviewerName} (${currentUser.email})` : 
+        interviewerName : 
         currentUser.email || 'Interviewer';
       
       // Initialize activity monitor in observer mode for interviewer
@@ -312,7 +312,7 @@
         const currentUser = Auth.getCurrentUser();
         const interviewerName = document.getElementById('interviewerName')?.value.trim();
         const adminName = interviewerName ? 
-          `${interviewerName} (${currentUser.email})` : 
+          interviewerName : 
           currentUser.email || 'Interviewer';
         
         // Initialize activity monitor in observer mode for interviewer
@@ -957,7 +957,7 @@
             const currentUser = Auth.getCurrentUser();
             const interviewerName = document.getElementById('interviewerName')?.value.trim();
             const adminName = interviewerName ? 
-              `${interviewerName} (${currentUser.email})` : 
+              interviewerName : 
               currentUser.email || 'Interviewer';
             window.location.hash = code;
             startSession(adminName, code, false);
