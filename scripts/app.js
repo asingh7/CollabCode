@@ -23,7 +23,15 @@
     if (adminBtn) {
       adminBtn.addEventListener('click', function() {
         document.getElementById('landingModal').style.display = 'none';
-        document.getElementById('adminLoginModal').style.display = 'flex';
+        // If the interviewer is already logged in (restored session),
+        // go straight to the dashboard instead of asking them to log in again.
+        if (window.Auth && Auth.isAdmin()) {
+          document.getElementById('adminLoginModal').style.display = 'none';
+          document.getElementById('adminDashboardModal').style.display = 'flex';
+          setupAdminDashboard();
+        } else {
+          document.getElementById('adminLoginModal').style.display = 'flex';
+        }
       });
     }
   }

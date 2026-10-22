@@ -224,6 +224,7 @@ const Auth = (function() {
   // Get current session (compatibility with app.js)
   function getCurrentSession() {
     return {
+      isLoggedIn: session.isAuthenticated === true,
       isAdmin: session.isAdmin,
       userName: session.userName,
       email: session.email
