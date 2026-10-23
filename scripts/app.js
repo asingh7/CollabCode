@@ -1672,7 +1672,9 @@
           }
           if (!text && finalCode && typeof finalCode.content === 'string' && finalCode.content.length) {
             text = finalCode.content;
-            language = finalCode.language || language;
+          }
+          if (!language && finalCode && finalCode.language) {
+            language = finalCode.language;
           }
 
           const langEl = document.getElementById('detail-code-language');
