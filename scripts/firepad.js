@@ -557,12 +557,20 @@
       endSessionBtn.addEventListener('click', function(e) {
         e.preventDefault();
         console.log('End Interview button clicked');
-        if (confirm('Are you sure you want to end this interview? All participants will be disconnected.')) {
-          console.log('User confirmed ending interview');
-          endSession();
-        } else {
-          console.log('User cancelled ending interview');
-        }
+        // Use the in-page confirm dialog: native confirm() can be
+        // suppressed or auto-dismissed in embedded views, which
+        // silently cancelled ending the interview.
+        const ask = (typeof window.confirmAsync === 'function')
+          ? window.confirmAsync('Are you sure you want to end this interview? All participants will be disconnected.', 'Confirm Termination', 'danger')
+          : Promise.resolve(confirm('Are you sure you want to end this interview? All participants will be disconnected.'));
+        ask.then(function(ok) {
+          if (ok) {
+            console.log('User confirmed ending interview');
+            endSession();
+          } else {
+            console.log('User cancelled ending interview');
+          }
+        });
       });
       
       // Ensure button is visible and clickable

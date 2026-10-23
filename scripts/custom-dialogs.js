@@ -88,52 +88,14 @@
     }, 300);
   };
 
-  // Override native alert and confirm
-  const originalAlert = window.alert;
-  const originalConfirm = window.confirm;
-
-  window.alert = function(message) {
-    // Determine type based on message content
-    let type = 'info';
-    let title = 'Notice';
-    
-    if (message.toLowerCase().includes('error') || message.toLowerCase().includes('failed')) {
-      type = 'error';
-      title = 'Error';
-    } else if (message.toLowerCase().includes('success') || message.toLowerCase().includes('completed')) {
-      type = 'success';
-      title = 'Success';
-    } else if (message.toLowerCase().includes('warning') || message.toLowerCase().includes('invalid')) {
-      type = 'warning';
-      title = 'Warning';
-    }
-    
-    customAlert(message, title, type);
-  };
-
-  window.confirm = function(message) {
-    // Determine type based on message content
-    let type = 'question';
-    let title = 'Confirm Action';
-    
-    if (message.toLowerCase().includes('delete') || message.toLowerCase().includes('terminate') || message.toLowerCase().includes('end')) {
-      type = 'danger';
-      title = 'Confirm Termination';
-    } else if (message.toLowerCase().includes('sure')) {
-      type = 'warning';
-      title = 'Are You Sure?';
-    }
-    
-    // Return a promise-like object that works with sync code
-    // This is a bit hacky but maintains compatibility
-    const result = customConfirm(message, title, type);
-    
-    // For synchronous confirm calls, we need to show a blocking dialog
-    // Use the original confirm as fallback for now
-    return originalConfirm(message);
-  };
-
-  // For async confirm, provide a new method
+  // NOTE: window.alert and window.confirm are intentionally NOT overridden.
+  // The previous override showed this custom modal AND then called the
+  // native confirm, returning only the native result. Where native dialogs
+  // are suppressed (embedded views/iframes) or auto-dismissed, that result
+  // was always "false", which silently cancelled actions such as ending
+  // or deleting a session - and the custom modal it had opened stayed on
+  // screen, blocking later clicks. Callers that need a confirmation use
+  // window.confirmAsync below (the styled in-page dialog).
   window.confirmAsync = function(message, title, type) {
     return customConfirm(message, title, type);
   };
