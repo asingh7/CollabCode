@@ -1,5 +1,17 @@
 // Main Application Controller
 (function() {
+  // Ask for confirmation using the in-page dialog (custom-dialogs.js).
+  // Native confirm() dialogs can be suppressed in embedded views/iframes
+  // or auto-dismissed, which silently cancelled End/Delete actions; the
+  // promise-based in-page dialog always works. Falls back to the native
+  // dialog only if the custom dialog system is unavailable.
+  function askConfirm(message, title) {
+    if (typeof window.confirmAsync === 'function') {
+      return window.confirmAsync(message, title || 'Confirm Action', 'danger');
+    }
+    return Promise.resolve(window.confirm(message));
+  }
+
   // Initialize the application
   function init() {
     setupLandingPage();
@@ -456,38 +468,41 @@
         
         if (isArchivedTab) {
           // In Ended Sessions tab - DELETE permanently
-          const message = sessionCodes.length === 1 
+          const message = sessionCodes.length === 1
             ? `⚠️ PERMANENTLY DELETE session ${sessionCodes[0]}?`
             : `⚠️ PERMANENTLY DELETE ${sessionCodes.length} selected sessions?`;
-            
-          if (confirm(message + '\n\nThis will remove all data forever and CANNOT be undone!')) {
-            if (confirm('FINAL CONFIRMATION: Delete these sessions forever?')) {
-              console.log('User confirmed, DELETING sessions...', sessionCodes);
-              
-              // Delete sessions with staggered timing to ensure Firebase handles them properly
-              sessionCodes.forEach((code, index) => {
-                setTimeout(() => {
-                  console.log(`Deleting session ${index + 1}/${sessionCodes.length}: ${code}`);
-                  deleteSession(code);
-                }, index * 200); // Stagger by 200ms
-              });
-              
-              showNotification(`Deleting ${sessionCodes.length} session(s)...`);
-            }
-          }
+
+          askConfirm(message + '\n\nThis will remove all data forever and CANNOT be undone!', 'Confirm Termination').then(function(ok) {
+            if (!ok) return;
+            return askConfirm('FINAL CONFIRMATION: Delete these sessions forever?', 'Confirm Termination');
+          }).then(function(ok) {
+            if (!ok) return;
+            console.log('User confirmed, DELETING sessions...', sessionCodes);
+
+            // Delete sessions with staggered timing to ensure Firebase handles them properly
+            sessionCodes.forEach((code, index) => {
+              setTimeout(() => {
+                console.log(`Deleting session ${index + 1}/${sessionCodes.length}: ${code}`);
+                deleteSession(code);
+              }, index * 200); // Stagger by 200ms
+            });
+
+            showNotification(`Deleting ${sessionCodes.length} session(s)...`);
+          });
         } else {
           // In Active tab - just end/terminate sessions
-          const message = sessionCodes.length === 1 
+          const message = sessionCodes.length === 1
             ? `End session ${sessionCodes[0]}?`
             : `End ${sessionCodes.length} selected sessions?`;
-            
-          if (confirm(message + ' All participants will be disconnected.')) {
+
+          askConfirm(message + ' All participants will be disconnected.', 'Confirm Termination').then(function(ok) {
+            if (!ok) return;
             console.log('User confirmed, ending sessions...');
             sessionCodes.forEach(code => {
               console.log('Ending:', code);
               terminateSessionFromDashboard(code);
             });
-          }
+          });
         }
       });
     }
@@ -506,28 +521,31 @@
         
         if (isArchivedTab) {
           // In Ended Sessions tab - DELETE ALL permanently
-          if (confirm(`⚠️ PERMANENTLY DELETE ALL ${checkboxes.length} ended sessions?\n\nThis will remove all data forever!`)) {
-            if (confirm('FINAL CONFIRMATION: Delete ALL ended sessions forever? This CANNOT be undone!')) {
-              const sessionCodes = Array.from(checkboxes).map(cb => cb.getAttribute('data-code'));
-              console.log('Mass deleting sessions:', sessionCodes);
-              
-              // Delete all sessions sequentially to ensure they complete
-              sessionCodes.forEach((code, index) => {
-                setTimeout(() => {
-                  console.log(`Deleting session ${index + 1}/${sessionCodes.length}: ${code}`);
-                  deleteSession(code);
-                }, index * 200); // Stagger deletions by 200ms to avoid overwhelming Firebase
-              });
-              
-              showNotification(`Deleting ${sessionCodes.length} sessions...`);
-            }
-          }
+          askConfirm(`⚠️ PERMANENTLY DELETE ALL ${checkboxes.length} ended sessions?\n\nThis will remove all data forever!`, 'Confirm Termination').then(function(ok) {
+            if (!ok) return null;
+            return askConfirm('FINAL CONFIRMATION: Delete ALL ended sessions forever? This CANNOT be undone!', 'Confirm Termination');
+          }).then(function(ok) {
+            if (!ok) return;
+            const sessionCodes = Array.from(checkboxes).map(cb => cb.getAttribute('data-code'));
+            console.log('Mass deleting sessions:', sessionCodes);
+
+            // Delete all sessions sequentially to ensure they complete
+            sessionCodes.forEach((code, index) => {
+              setTimeout(() => {
+                console.log(`Deleting session ${index + 1}/${sessionCodes.length}: ${code}`);
+                deleteSession(code);
+              }, index * 200); // Stagger deletions by 200ms to avoid overwhelming Firebase
+            });
+
+            showNotification(`Deleting ${sessionCodes.length} sessions...`);
+          });
         } else {
           // In Active tab - end all sessions
-          if (confirm(`End ALL ${checkboxes.length} active sessions? This will disconnect all participants.`)) {
+          askConfirm(`End ALL ${checkboxes.length} active sessions? This will disconnect all participants.`, 'Confirm Termination').then(function(ok) {
+            if (!ok) return;
             const sessionCodes = Array.from(checkboxes).map(cb => cb.getAttribute('data-code'));
             sessionCodes.forEach(code => terminateSessionFromDashboard(code));
-          }
+          });
         }
       });
     }
@@ -662,7 +680,21 @@
       // Filter sessions into active/in-progress and ended
       Object.keys(sessions).forEach(code => {
         const session = sessions[code];
-        
+
+        // Skip sessions that were permanently deleted. A still-open client
+        // can recreate fragments (activity data, presence) after a delete;
+        // those fragments must not bring the session back into the lists.
+        if (session && session.terminated && session.terminated.deleted) {
+          return;
+        }
+
+        // Skip ghost shells: a node with no creation record, no users and
+        // no editor data is just leftover fragments written by a lingering
+        // client after the session was deleted - not a real session.
+        if (!session.created && !session.createdBy && !session.users && !session.firepad) {
+          return;
+        }
+
         const sessionAge = now - (session.created || now);
         const userCount = Object.keys(session.users || {}).length;
         
@@ -969,9 +1001,9 @@
         if (terminateBtn) {
           terminateBtn.addEventListener('click', function() {
             const code = this.getAttribute('data-code');
-            if (confirm(`End session ${code}? This will mark the interview as completed and move it to Ended Sessions.`)) {
-              terminateSessionFromDashboard(code);
-            }
+            askConfirm(`End session ${code}? This will mark the interview as completed and move it to Ended Sessions.`, 'Confirm Termination').then(function(ok) {
+              if (ok) terminateSessionFromDashboard(code);
+            });
           });
         }
         
@@ -1004,12 +1036,13 @@
           deleteForeverBtn.addEventListener('click', function() {
             const code = this.getAttribute('data-code');
             const message = `⚠️ PERMANENTLY DELETE session ${code}?\n\nThis will:\n• Remove ALL session data\n• Delete ALL interview notes\n• Remove from Firebase completely\n• This CANNOT be undone!\n\nAre you absolutely sure?`;
-            if (confirm(message)) {
+            askConfirm(message, 'Confirm Termination').then(function(ok) {
+              if (!ok) return null;
               // Double confirmation for safety
-              if (confirm(`FINAL CONFIRMATION: Delete session ${code} forever?`)) {
-                deleteSession(code);
-              }
-            }
+              return askConfirm(`FINAL CONFIRMATION: Delete session ${code} forever?`, 'Confirm Termination');
+            }).then(function(ok) {
+              if (ok) deleteSession(code);
+            });
           });
         }
         
@@ -1018,9 +1051,9 @@
         if (endBtn) {
           endBtn.addEventListener('click', function() {
             const code = this.getAttribute('data-code');
-            if (confirm(`End session ${code}? This will mark the interview as completed and move it to Ended Sessions.`)) {
-              terminateSessionFromDashboard(code);
-            }
+            askConfirm(`End session ${code}? This will mark the interview as completed and move it to Ended Sessions.`, 'Confirm Termination').then(function(ok) {
+              if (ok) terminateSessionFromDashboard(code);
+            });
           });
         }
       });
@@ -1153,45 +1186,71 @@
   // Delete session completely from Firebase - HARD DELETE
   function deleteSession(sessionCode) {
     console.log('HARD DELETING session:', sessionCode);
-    
+
     if (!window.firebase || !window.firebase.database) {
       alert('Database connection not ready');
       return;
     }
-    
+
+    const sessionRef = window.firebase.database().ref('sessions/' + sessionCode);
+    let existed = false;
+
     // First, try to read the session to confirm it exists
-    window.firebase.database().ref('sessions/' + sessionCode).once('value')
+    sessionRef.once('value')
       .then(function(snapshot) {
         if (!snapshot.exists()) {
           console.log('Session does not exist:', sessionCode);
           showNotification('Session ' + sessionCode + ' does not exist', true);
-          return;
+          return null;
         }
-        
+        existed = true;
         console.log('Session exists, proceeding with HARD DELETE');
-        
-        // Now perform the actual deletion
-        return window.firebase.database().ref('sessions/' + sessionCode).remove();
+
+        // Step 1: write a deletion tombstone BEFORE removing the node.
+        // Clients that still have this session open (editor, presence,
+        // activity tracking) watch for it and stop writing immediately -
+        // otherwise their next write recreates the session node and it
+        // reappears in the Active list after a refresh.
+        return sessionRef.update({
+          terminated: {
+            terminated: true,
+            deleted: true,
+            terminatedBy: 'Admin Dashboard',
+            terminatedAt: window.firebase.database.ServerValue.TIMESTAMP
+          }
+        });
       })
       .then(function(result) {
-        if (result !== undefined) { // Only show success if we actually deleted
-          console.log('Session ' + sessionCode + ' HARD DELETED successfully');
-          showNotification('Session ' + sessionCode + ' has been PERMANENTLY DELETED from database');
-          
-          // Force refresh the sessions list after a short delay
-          setTimeout(() => {
-            if (typeof loadActiveSessions === 'function') {
-              const archivedTabBtn = document.getElementById('archivedTabBtn');
-              const isArchived = archivedTabBtn && archivedTabBtn.classList.contains('active');
-              loadActiveSessions(isArchived);
-            }
-          }, 500);
-        }
+        if (!existed) return null;
+        // Step 2: remove the whole session node.
+        return sessionRef.remove();
+      })
+      .then(function() {
+        if (!existed) return;
+        console.log('Session ' + sessionCode + ' HARD DELETED successfully');
+        showNotification('Session ' + sessionCode + ' has been PERMANENTLY DELETED from database');
+
+        // Step 3: sweep again after a few seconds to remove any fragments
+        // that were already in flight from a still-open tab when the
+        // tombstone landed. The sessions list also ignores fragments of
+        // deleted sessions, so they can never reappear in the UI.
+        setTimeout(function() {
+          sessionRef.remove().catch(function() { /* already gone */ });
+        }, 3000);
+
+        // Force refresh the sessions list after a short delay
+        setTimeout(() => {
+          if (typeof loadActiveSessions === 'function') {
+            const archivedTabBtn = document.getElementById('archivedTabBtn');
+            const isArchived = archivedTabBtn && archivedTabBtn.classList.contains('active');
+            loadActiveSessions(isArchived);
+          }
+        }, 500);
       })
       .catch(function(error) {
         console.error('Error HARD DELETING session:', error);
         console.error('Error details:', error.code, error.message);
-        
+
         if (error.code === 'PERMISSION_DENIED') {
           showNotification('Permission denied. Update Firebase rules to allow deletion.', true);
           alert('Cannot delete: Permission denied.\n\nPlease update Firebase rules:\nAdd ".write": true at the sessions root level');
