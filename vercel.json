@@ -15,6 +15,9 @@
     },
     "api/sessions/create.js": {
       "maxDuration": 10
+    },
+    "api/code/execute.js": {
+      "maxDuration": 60
     }
   },
   "headers": [
