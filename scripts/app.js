@@ -12,6 +12,67 @@
     return Promise.resolve(window.confirm(message));
   }
 
+  // Rebuild a session's final document text from its Firepad data.
+  // Firepad stores an optional checkpoint (an operation that produces
+  // the document at that revision from an empty document) plus the full
+  // operation history. Operations use the ot.js JSON format: a string
+  // inserts text, a positive number retains that many characters, and a
+  // negative number deletes that many characters.
+  function applyTextOperation(text, operation) {
+    let result = '';
+    let index = 0;
+    for (const component of operation || []) {
+      if (typeof component === 'string') {
+        result += component;
+      } else if (typeof component === 'number' && component > 0) {
+        result += text.slice(index, index + component);
+        index += component;
+      } else if (typeof component === 'number' && component < 0) {
+        index += -component;
+      }
+    }
+    result += text.slice(index);
+    return result;
+  }
+
+  function firepadRevisionNumber(key) {
+    const m = String(key).match(/(\d+)$/);
+    return m ? parseInt(m[1], 10) : null;
+  }
+
+  function reconstructSessionCode(firepadData) {
+    if (!firepadData) return null;
+    let text = '';
+    let afterRevision = -1;
+
+    if (firepadData.checkpoint && Array.isArray(firepadData.checkpoint.o)) {
+      text = applyTextOperation('', firepadData.checkpoint.o);
+      const cpRev = firepadRevisionNumber(firepadData.checkpoint.id || '');
+      if (cpRev !== null) afterRevision = cpRev;
+    }
+
+    const history = firepadData.history || {};
+    const keys = Object.keys(history);
+    if (!keys.length) return text || null;
+
+    // Firepad revision keys look like "A12" (numeric order matters);
+    // anything else (e.g. push ids) sorts chronologically as strings.
+    const allRevisionKeys = keys.every(k => firepadRevisionNumber(k) !== null);
+    keys.sort((a, b) => allRevisionKeys
+      ? firepadRevisionNumber(a) - firepadRevisionNumber(b)
+      : (a < b ? -1 : a > b ? 1 : 0));
+
+    for (const key of keys) {
+      const rev = firepadRevisionNumber(key);
+      if (allRevisionKeys && rev !== null && rev <= afterRevision) continue;
+      const entry = history[key];
+      if (entry && Array.isArray(entry.o)) {
+        text = applyTextOperation(text, entry.o);
+      }
+    }
+    return text;
+  }
+
   // Initialize the application
   function init() {
     setupLandingPage();
@@ -1081,11 +1142,14 @@
     }
     
     const sessionRef = window.firebase.database().ref('sessions/' + sessionCode);
-    
-    // First, preserve the current participants before ending
-    sessionRef.child('users').once('value').then(function(snapshot) {
-      const currentUsers = snapshot.val() || {};
-      
+
+    // Read the whole session first: preserve the participants AND capture
+    // the final code (rebuilt from the Firepad history) so the code stays
+    // viewable from Ended Sessions after the interview is over.
+    sessionRef.once('value').then(function(snapshot) {
+      const sessionData = snapshot.val() || {};
+      const currentUsers = sessionData.users || {};
+
       // Save participants data permanently
       const participantsData = {};
       Object.keys(currentUsers).forEach(userId => {
@@ -1095,16 +1159,39 @@
           joinedAt: user.timestamp || Date.now()
         };
       });
-      
-      // Now terminate the session with preserved participant data
-      sessionRef.update({
+
+      const update = {
         terminated: {
           terminated: true,
           terminatedBy: 'Admin Dashboard',
           terminatedAt: window.firebase.database.ServerValue.TIMESTAMP
         },
         preservedParticipants: participantsData
-      }).then(function() {
+      };
+
+      // Snapshot the code unless one was already saved (e.g. the session
+      // was ended from inside the editor, which stores its own finalCode).
+      if (!sessionData.finalCode) {
+        try {
+          const codeText = reconstructSessionCode(sessionData.firepad);
+          if (codeText) {
+            update.finalCode = {
+              content: codeText,
+              language: (sessionData.settings && sessionData.settings.language) || 'javascript',
+              savedAt: window.firebase.database.ServerValue.TIMESTAMP,
+              lineCount: codeText.split('\n').length,
+              characterCount: codeText.length,
+              savedBy: 'Admin Dashboard'
+            };
+          }
+        } catch (e) {
+          console.error('Could not snapshot session code on end:', e);
+        }
+      }
+
+      // Now terminate the session with preserved participant data
+      return sessionRef.update(update);
+    }).then(function() {
         console.log('Session ' + sessionCode + ' ended successfully with preserved participants');
         // Show feedback
         showNotification('Session ' + sessionCode + ' has been ended');
@@ -1112,9 +1199,8 @@
         console.error('Error ending session:', error);
         alert('Failed to end session: ' + error.message);
       });
-    });
   }
-  
+
   // Show notification helper
   function showNotification(message, isError = false) {
     // Simple notification (you can enhance this)
@@ -1548,21 +1634,78 @@
           console.error('Error loading notes:', error);
         });
       
-      // Load code content
-      window.firebase.database()
-        .ref(`sessions/${sessionCode}/firepad`)
-        .once('value')
-        .then(snapshot => {
-          const firepadData = snapshot.val();
-          // Note: Firepad data is complex, we'd need to parse it properly
-          // For now, just indicate if code exists
-          const codeTab = document.getElementById('code-tab');
-          if (firepadData && firepadData.history) {
-            codeTab.innerHTML = '<p style="padding: 20px;">Code content available. Click "Join" to view in editor.</p>';
+      // Load the session's code so it stays viewable after the session
+      // has ended: prefer the saved finalCode snapshot; otherwise rebuild
+      // the document from the Firepad operation history.
+      const codeContentEl = document.getElementById('detail-code-content');
+      if (codeContentEl) {
+        codeContentEl.textContent = 'Loading code...';
+        const db = window.firebase.database();
+        Promise.all([
+          db.ref(`sessions/${sessionCode}/finalCode`).once('value'),
+          db.ref(`sessions/${sessionCode}/firepad`).once('value'),
+          db.ref(`sessions/${sessionCode}/settings`).once('value')
+        ]).then(([finalSnap, firepadSnap, settingsSnap]) => {
+          const finalCode = finalSnap.val();
+          const settings = settingsSnap.val() || {};
+          let text = null;
+          let language = settings.language || null;
+
+          if (finalCode && typeof finalCode.content === 'string' && finalCode.content.length) {
+            text = finalCode.content;
+            language = finalCode.language || language;
           } else {
-            codeTab.innerHTML = '<p style="padding: 20px;">No code written in this session.</p>';
+            try {
+              text = reconstructSessionCode(firepadSnap.val());
+            } catch (e) {
+              console.error('Failed to reconstruct session code:', e);
+              text = null;
+            }
           }
+
+          const langEl = document.getElementById('detail-code-language');
+          if (langEl) langEl.textContent = language ? `(${language})` : '';
+          const metaEl = document.getElementById('detail-code-meta');
+          window.__detailCodeText = text || '';
+
+          if (text) {
+            codeContentEl.textContent = text;
+            if (metaEl) {
+              metaEl.textContent = `${text.split('\n').length} lines · ${text.length} characters`;
+            }
+          } else {
+            codeContentEl.textContent = '';
+            if (metaEl) metaEl.textContent = '';
+            codeContentEl.textContent = 'No code was written in this session.';
+          }
+        }).catch(error => {
+          console.error('Error loading session code:', error);
+          codeContentEl.textContent = 'Could not load the session code.';
         });
+
+        // Copy button (onclick assignment replaces any previous handler)
+        const copyBtn = document.getElementById('copy-session-code-btn');
+        if (copyBtn) {
+          copyBtn.onclick = function() {
+            const text = window.__detailCodeText || '';
+            if (!text) return;
+            const done = () => showNotification('Session code copied to clipboard');
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy());
+            } else {
+              fallbackCopy();
+            }
+            function fallbackCopy() {
+              const ta = document.createElement('textarea');
+              ta.value = text;
+              document.body.appendChild(ta);
+              ta.select();
+              try { document.execCommand('copy'); done(); } catch (e) { /* clipboard unavailable */ }
+              ta.remove();
+            }
+          };
+        }
+      }
     }
     
     // Load session info
