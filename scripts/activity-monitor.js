@@ -6,6 +6,10 @@
   let sessionCode = null;
   let userId = null;
   let userType = null;
+  // Set when the session is permanently deleted from the dashboard:
+  // all activity writes must stop, otherwise they recreate the
+  // deleted session node (it then reappears in the Active list).
+  let sessionDeleted = false;
   
   // Idle detection state (moved to module scope)
   let isIdle = false;
@@ -27,7 +31,22 @@
     sessionCode = session;
     userId = user;
     userType = type;
-    
+    sessionDeleted = false;
+
+    // Watch for permanent deletion of this session and stop all writes.
+    if (window.firebase && window.firebase.database) {
+      firebase.database()
+        .ref(`sessions/${sessionCode}/terminated`)
+        .on('value', function(snapshot) {
+          const data = snapshot.val();
+          if (data && data.deleted) {
+            sessionDeleted = true;
+            monitoring = false;
+            console.log('Session deleted - activity monitoring stopped');
+          }
+        });
+    }
+
     // For candidates, track their activity
     if (type === 'candidate') {
       monitoring = true;
@@ -293,6 +312,8 @@
   function logEvent(eventType, data) {
     if (!monitoring) return;
     
+    if (sessionDeleted) return;
+
     if (!window.firebase || !window.firebase.database) {
       console.warn('Firebase not available for logging event:', eventType);
       return;
@@ -352,7 +373,7 @@
   // 7. Report metrics periodically
   function reportMetricsPeriodically() {
     setInterval(function() {
-      if (!monitoring) return;
+      if (!monitoring || sessionDeleted) return;
       
       // Calculate total idle time including current idle period
       let currentIdleTime = metrics.totalIdleTime;
@@ -444,7 +465,7 @@
   
   // Save final activity summary when session ends
   window.saveActivitySummary = function() {
-    if (!monitoring) return;
+    if (!monitoring || sessionDeleted) return;
     
     // Check if currently idle and add that time
     let finalIdleTime = metrics.totalIdleTime;

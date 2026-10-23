@@ -668,13 +668,31 @@
   // Monitor for session termination
   function monitorSessionTermination() {
     if (!sessionRef) return;
-    
+
     // Both admin and non-admin should monitor, but respond differently
     sessionRef.child('terminated').on('value', function(snapshot) {
       const data = snapshot.val();
       if (data && data.terminated) {
         console.log('Session has been terminated');
-        
+
+        if (data.deleted) {
+          // The session was PERMANENTLY DELETED from the dashboard.
+          // Disconnect this client and stop the editor/activity sync:
+          // any further write from this tab would recreate the deleted
+          // session node in the database.
+          try { if (firepad) { firepad.dispose(); firepad = null; } } catch (e) {}
+          try { if (sessionRef) sessionRef.off(); } catch (e) {}
+          try { if (usersRef) usersRef.off(); } catch (e) {}
+          if (currentUser && !currentUser.isAdmin) {
+            showSessionTerminatedModal();
+          } else {
+            // Admin with the deleted session open: leave the editor.
+            window.location.hash = '';
+            location.reload();
+          }
+          return;
+        }
+
         if (!currentUser.isAdmin) {
           // Non-admin: show termination modal
           showSessionTerminatedModal();
