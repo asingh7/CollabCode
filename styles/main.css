@@ -3121,3 +3121,86 @@ a.powered-by-firepad {
   background: #ff0000;
   color: white;
 }
+
+/* Custom in-page dialogs (scripts/custom-dialogs.js)
+   These styles were missing, which left the confirm dialog unstyled
+   and effectively invisible behind other content. The overlay must sit
+   above every other layer (session modals use z-index 1000). */
+.custom-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 20000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.custom-modal.show {
+  opacity: 1;
+}
+
+.custom-modal-content {
+  background: #ffffff;
+  color: #222;
+  border-radius: 10px;
+  padding: 28px 28px 20px;
+  max-width: 440px;
+  width: calc(100% - 48px);
+  text-align: center;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
+.custom-modal-icon {
+  font-size: 34px;
+  line-height: 1;
+  margin-bottom: 12px;
+}
+
+.custom-modal-icon.danger,
+.custom-modal-icon.error,
+.custom-modal-icon.warning {
+  color: #e53935;
+}
+
+.custom-modal-title {
+  margin: 0 0 10px;
+  font-size: 20px;
+}
+
+.custom-modal-message {
+  margin: 0 0 20px;
+  white-space: pre-line;
+  color: #444;
+}
+
+.custom-modal-buttons {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.custom-modal-btn {
+  border: none;
+  border-radius: 6px;
+  padding: 10px 22px;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.custom-modal-btn.cancel {
+  background: #e0e0e0;
+  color: #333;
+}
+
+.custom-modal-btn.confirm,
+.custom-modal-btn.primary {
+  background: #e53935;
+  color: #fff;
+}
+
+.custom-modal-btn.primary {
+  background: #1976d2;
+}
