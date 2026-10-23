@@ -35,9 +35,20 @@
     return result;
   }
 
-  function firepadRevisionNumber(key) {
-    const m = String(key).match(/(\d+)$/);
-    return m ? parseInt(m[1], 10) : null;
+  // Firepad revision ids encode the revision as base-62 digits behind a
+  // length-prefix letter: A + 1 digit (A0=0 ... A9=9, AA=10 ... Az=61),
+  // B + 2 digits (B10=62 ...), and so on.
+  const FIREPAD_BASE62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+  function firepadRevisionNumber(id) {
+    const m = /^([A-Z])([0-9A-Za-z]+)$/.exec(String(id));
+    if (!m) return null;
+    let n = 0;
+    for (const ch of m[2]) {
+      const v = FIREPAD_BASE62.indexOf(ch);
+      if (v < 0) return null;
+      n = n * 62 + v;
+    }
+    return n;
   }
 
   function reconstructSessionCode(firepadData) {
@@ -55,8 +66,6 @@
     const keys = Object.keys(history);
     if (!keys.length) return text || null;
 
-    // Firepad revision keys look like "A12" (numeric order matters);
-    // anything else (e.g. push ids) sorts chronologically as strings.
     const allRevisionKeys = keys.every(k => firepadRevisionNumber(k) !== null);
     keys.sort((a, b) => allRevisionKeys
       ? firepadRevisionNumber(a) - firepadRevisionNumber(b)
@@ -1651,16 +1660,19 @@
           let text = null;
           let language = settings.language || null;
 
-          if (finalCode && typeof finalCode.content === 'string' && finalCode.content.length) {
+          // Rebuild from the Firepad history whenever it exists: the
+          // replay is exact, and it self-corrects any older snapshot
+          // taken before reconstruction fixes. The saved finalCode is
+          // the fallback for sessions whose history is unavailable.
+          try {
+            text = reconstructSessionCode(firepadSnap.val());
+          } catch (e) {
+            console.error('Failed to reconstruct session code:', e);
+            text = null;
+          }
+          if (!text && finalCode && typeof finalCode.content === 'string' && finalCode.content.length) {
             text = finalCode.content;
             language = finalCode.language || language;
-          } else {
-            try {
-              text = reconstructSessionCode(firepadSnap.val());
-            } catch (e) {
-              console.error('Failed to reconstruct session code:', e);
-              text = null;
-            }
           }
 
           const langEl = document.getElementById('detail-code-language');
